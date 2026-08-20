@@ -1,0 +1,10 @@
+bundle:
+  name: etl_kan_75_etl_bronze_jaffle_shop_payments
+resources:
+  jobs:
+    etl_kan_75_etl_bronze_jaffle_shop_payments:
+      name: etl_kan_75_etl_bronze_jaffle_shop_payments
+      tasks:
+      - task_key: run_notebook
+        notebook_task:
+          notebook_path: /Workspace/etl_agent_framework/etl_kan_75_etl_bronze_jaffle_shop_payments
