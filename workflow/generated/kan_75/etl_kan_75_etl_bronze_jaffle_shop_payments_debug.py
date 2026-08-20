@@ -24,7 +24,7 @@ df_source = (
 # 2. Apply transformations and select columns
 df_bronze = (
     df_source.select(
-        F.col("id").cast(IntegerType()).alias("id"),
+        F.col("payment_id").cast(IntegerType()).alias("payment_id"),
         F.col("order_id").cast(IntegerType()).alias("order_id"),
         F.col("payment_method").cast(StringType()).alias("payment_method"),
         F.col("amount").cast(DoubleType()).alias("amount"),
@@ -58,7 +58,7 @@ def validate_bronze_jaffle_shop_payments(df: DataFrame) -> DataFrame:
 
     # Define the schema for the output DataFrame of failed records
     output_schema = StructType([
-        StructField("id", IntegerType(), True),
+        StructField("payment_id", IntegerType(), True),
         StructField("order_id", IntegerType(), True),
         StructField("payment_method", StringType(), True),
         StructField("amount", DoubleType(), True),
@@ -73,7 +73,7 @@ def validate_bronze_jaffle_shop_payments(df: DataFrame) -> DataFrame:
     # Severity: Critical
     rule_name_1 = "id_not_null"
     failure_message_1 = "Payment ID cannot be null."
-    failed_records_id_null = df.filter(isnull(col("id")))
+    failed_records_id_null = df.filter(isnull(col("payment_id")))
     if failed_records_id_null.count() > 0:
         validation_results.append(
             failed_records_id_null.withColumn("rule_name", lit(rule_name_1))
@@ -87,11 +87,11 @@ def validate_bronze_jaffle_shop_payments(df: DataFrame) -> DataFrame:
     # Severity: Critical
     rule_name_2 = "id_unique"
     failure_message_2 = "Duplicate Payment ID found."
-    duplicate_ids = df.groupBy("id").agg(count("*").alias("count")) \
+    duplicate_ids = df.groupBy("payment_id").agg(count("*").alias("count")) \
                       .filter(col("count") > 1) \
-                      .select("id")
+                      .select("payment_id")
     if duplicate_ids.count() > 0:
-        failed_records_id_unique = df.join(duplicate_ids, "id", "inner")
+        failed_records_id_unique = df.join(duplicate_ids, "payment_id", "inner")
         validation_results.append(
             failed_records_id_unique.withColumn("rule_name", lit(rule_name_2))
                                     .withColumn("severity", lit("Critical"))
