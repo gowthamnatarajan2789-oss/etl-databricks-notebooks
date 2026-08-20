@@ -1,427 +1,270 @@
 # DEBUG DUMP -- raw generated code, saved for inspection.
-# Generated at: 2026-08-20T09:35:59.107545+00:00
+# Generated at: 2026-08-20T10:19:03.058866+00:00
 # Note: no validation errors
 
-import uuid
-from pyspark.sql import DataFrame
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType, TimestampType
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    StructType,
-    StructField,
-    IntegerType,
-    DateType,
-    DecimalType,
-    StringType,
-    TimestampType,
-)
 
 # This is a New Feature.
-# Implementation Approach: Define a schema for the source CSV, read the CSV using this schema,
-# add standard audit columns, and write the resulting DataFrame to the target Delta table in overwrite mode.
+# Design: Define an explicit schema for the CSV, read the CSV with the schema,
+# add audit columns (_load_timestamp, _source_file), and write to the Delta table in overwrite mode.
 
-# Define source and target paths/tables
-SOURCE_FILE_PATH = "/Volumes/workspace/default/raw_data/jaffle_shop/orders.csv"
-TARGET_TABLE_NAME = "workspace.default.bronze_jaffle_shop_payments"
+# Initialize Spark Session (if not already available in Databricks)
+# spark = SparkSession.builder.appName("JaffleShopPaymentsBronzeIngestion").getOrCreate()
 
-# Define the schema for the orders.csv file
-# This schema is based on the proposed schema in the requirements and should be validated.
-orders_schema = StructType(
-    [
-        StructField("order_id", IntegerType(), True),
-        StructField("customer_id", IntegerType(), True),
-        StructField("order_date", DateType(), True),
-        StructField("amount", DecimalType(10, 2), True),
-        StructField("payment_method", StringType(), True),
-        StructField("status", StringType(), True),
-        StructField("transaction_id", StringType(), True),
-        StructField("payment_timestamp", TimestampType(), True),
-    ]
-)
-
-
-def ingest_orders_to_bronze(
-    source_path: str, target_table: str, schema: StructType
-) -> None:
-    """
-    Ingests data from the orders.csv file into the bronze_jaffle_shop_payments Delta table.
-
-    Args:
-        source_path: The full path to the source CSV file.
-        target_table: The fully qualified name of the target Delta table.
-        schema: The PySpark StructType schema to apply when reading the CSV.
-    """
-    try:
-        # Generate a unique load ID for this ETL run
-        load_id = str(uuid.uuid4())
-
-        # Read the source CSV file with the predefined schema
-        df_orders = (
-            spark.read.format("csv")
-            .option("header", "true")
-            .option("delimiter", ",")
-            .schema(schema)
-            .load(source_path)
-        )
-
-        # Add audit columns
-        df_bronze = df_orders.withColumn(
-            "_ingest_timestamp", F.current_timestamp()
-        ).withColumn("_source_file_name", F.input_file_name().alias("_source_file_name")).withColumn(
-            "_load_id", F.lit(load_id)
-        )
-
-        # Write the DataFrame to the target Delta table in overwrite mode
-        df_bronze.write.format("delta").mode("overwrite").saveAsTable(target_table)
-
-        print(f"Successfully ingested data from {source_path} to {target_table}")
-        print(f"Number of records written: {df_bronze.count()}")
-
-    except Exception as e:
-        print(f"Error ingesting data from {source_path} to {target_table}: {e}")
-        raise
-
-
-# Execute the ingestion function
-ingest_orders_to_bronze(SOURCE_FILE_PATH, TARGET_TABLE_NAME, orders_schema)
-
-from pyspark.sql import DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, IntegerType, DateType, DecimalType, StringType, TimestampType
-import logging
-from datetime import date, datetime
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Databricks Notebook Cell 1: Define Schema and Setup
-
-# Define a schema for the raw orders data based on the proposed schema.
-# This is crucial because the requirement states 'Infer Schema: false'
-# and we need a fixed schema for validation.
-# NOTE: This schema is based on the 'Proposed Data Type' from the problem description.
-# It should be confirmed by the data source owner.
-raw_orders_schema = StructType([
-    StructField("order_id", IntegerType(), False), # Assuming order_id is non-nullable
-    StructField("customer_id", IntegerType(), False), # Assuming customer_id is non-nullable
-    StructField("order_date", DateType(), False), # Assuming order_date is non-nullable
-    StructField("amount", DecimalType(10, 2), False), # Assuming amount is non-nullable
-    StructField("payment_method", StringType(), False), # Assuming payment_method is non-nullable
-    StructField("status", StringType(), False), # Assuming status is non-nullable
-    StructField("transaction_id", StringType(), True), # transaction_id can be null if payment not processed
-    StructField("payment_timestamp", TimestampType(), True) # payment_timestamp can be null if payment not processed
+# Define the explicit schema for the payments.csv file
+# CRITICAL NOTE: This schema is ASSUMED based on common Jaffle Shop datasets.
+# It MUST BE CONFIRMED with the data source owner.
+payments_schema = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("order_id", IntegerType(), False),
+    StructField("payment_method", StringType(), False),
+    StructField("amount", IntegerType(), False)
 ])
 
-# Databricks Notebook Cell 2: Data Quality Validation Function
+# Define source and target paths/names
+source_file_path = "/Volumes/workspace/default/raw_data/jaffle_shop/payments.csv"
+target_table_name = "workspace.default.bronze_jaffle_shop_payments"
 
-def run_data_quality_checks(df: DataFrame, table_name: str) -> DataFrame:
+try:
+    # Read the CSV file with the defined schema
+    payments_df = spark.read.csv(
+        source_file_path,
+        header=True,
+        schema=payments_schema,
+        sep=","
+    )
+
+    # Add audit columns
+    payments_bronze_df = payments_df.withColumn(
+        "_load_timestamp",
+        F.current_timestamp()
+    ).withColumn(
+        "_source_file",
+        F.input_file_name()
+    )
+
+    # Write the DataFrame to the Delta table in overwrite mode
+    payments_bronze_df.write.format("delta").mode("overwrite").saveAsTable(target_table_name)
+
+    print(f"Successfully loaded data from '{source_file_path}' to '{target_table_name}'")
+
+except Exception as e:
+    print(f"Error loading payments data: {e}")
+    raise e
+
+import pyspark.sql.functions as F
+from pyspark.sql import DataFrame
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
+
+# Cell 1: Data Quality Validation Function
+
+def run_data_quality_checks(df: DataFrame, rules: list) -> DataFrame:
     """
-    Runs a series of data quality checks on the input DataFrame for Jaffle Shop Payments.
+    Applies a list of data quality rules to a DataFrame and returns a DataFrame
+    of failing records with a _dq_failure_reason column.
 
     Args:
-        df (DataFrame): The input PySpark DataFrame to validate.
-        table_name (str): The name of the table being validated (for logging/reporting).
-
+        df: The input Spark DataFrame.
+        rules: A list of dictionaries, each defining a data quality rule.
+               Each rule dictionary should have:
+               - "rule_name": Name of the rule.
+               - "business_purpose": Description of the rule's purpose.
+               - "validation_logic": Spark SQL expression for row-level checks,
+                                     or a specific string like "AGGREGATE_UNIQUE" for aggregate checks.
+               - "target_column": The column(s) the rule applies to (e.g., "id" for uniqueness).
+               - "severity": "critical", "high", "medium", "low".
+               - "failure_message": Message to display if the rule fails.
     Returns:
-        DataFrame: A DataFrame containing the results of the data quality checks.
-                   Each row represents a failed rule, including count and sample IDs.
-                   Returns an empty DataFrame with the expected schema if no failures.
+        A DataFrame containing records that failed any validation rule,
+        along with a '_dq_failure_reason' column.
+        Returns an empty DataFrame with the expected schema if no failures are found.
     """
-    logger.info(f"Starting data quality checks for table: {table_name}")
+    failing_records_dfs = []
+    original_cols = df.columns # Capture original columns for consistent output schema
 
-    validation_results = []
+    for rule in rules:
+        rule_name = rule["rule_name"]
+        validation_logic = rule["validation_logic"]
+        target_column = rule.get("target_column")
+        failure_message = rule["failure_message"]
+        severity = rule["severity"]
+        full_failure_msg = f"{rule_name}: {failure_message} (Severity: {severity})"
 
-    # --- Rule 1: Completeness - order_id must not be null ---
-    rule_name = "order_id_not_null"
-    business_purpose = "Ensure every order has a unique identifier."
-    severity = "CRITICAL"
-    failure_message = "Order ID is missing."
-    failed_records = df.filter(F.col("order_id").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
+        if validation_logic == "AGGREGATE_UNIQUE":
+            if not target_column:
+                raise ValueError(f"Rule '{rule_name}' of type AGGREGATE_UNIQUE requires 'target_column'.")
 
-    # --- Rule 2: Uniqueness - order_id must be unique ---
-    rule_name = "order_id_unique"
-    business_purpose = "Ensure each order has a unique identifier to prevent data integrity issues."
-    severity = "CRITICAL"
-    failure_message = "Duplicate Order ID found."
-    duplicate_order_ids = df.groupBy("order_id").count().filter(F.col("count") > 1)
-    if duplicate_order_ids.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": duplicate_order_ids.count(),
-            "sample_failed_ids": [row.order_id for row in duplicate_order_ids.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {duplicate_order_ids.count()} records.")
+            duplicate_ids = df.groupBy(target_column).agg(F.count(target_column).alias("count")) \
+                              .filter("count > 1") \
+                              .select(target_column)
 
-    # --- Rule 3: Completeness - customer_id must not be null ---
-    rule_name = "customer_id_not_null"
-    business_purpose = "Ensure every order is associated with a customer."
-    severity = "CRITICAL"
-    failure_message = "Customer ID is missing."
-    failed_records = df.filter(F.col("customer_id").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
+            if duplicate_ids.count() > 0:
+                failing_df = df.join(duplicate_ids, target_column, "inner") \
+                               .withColumn("_dq_failure_reason", F.lit(full_failure_msg))
+                # Ensure the failing_df has the same schema as original_cols + _dq_failure_reason
+                failing_records_dfs.append(failing_df.select(*original_cols, "_dq_failure_reason"))
+        else:
+            # Row-level checks
+            failing_df = df.filter(F.expr(validation_logic))
+            if failing_df.count() > 0:
+                failing_df = failing_df.withColumn("_dq_failure_reason", F.lit(full_failure_msg))
+                # Ensure the failing_df has the same schema as original_cols + _dq_failure_reason
+                failing_records_dfs.append(failing_df.select(*original_cols, "_dq_failure_reason"))
 
-    # --- Rule 4: Completeness - order_date must not be null ---
-    rule_name = "order_date_not_null"
-    business_purpose = "Ensure every order has a recorded date."
-    severity = "CRITICAL"
-    failure_message = "Order Date is missing."
-    failed_records = df.filter(F.col("order_date").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
+    if failing_records_dfs:
+        # Union all failing records
+        union_df = failing_records_dfs[0]
+        for i in range(1, len(failing_records_dfs)):
+            union_df = union_df.unionByName(failing_records_dfs[i], allowMissingColumns=True)
 
-    # --- Rule 5: Validity - amount must not be null and must be positive ---
-    rule_name = "amount_not_null_and_positive"
-    business_purpose = "Ensure every order has a valid, positive amount."
-    severity = "CRITICAL"
-    failure_message = "Order amount is missing or not positive."
-    failed_records = df.filter(F.col("amount").isNull() | (F.col("amount") <= 0))
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
+        # Group by original columns to consolidate failure reasons into a single string
+        consolidated_failures = union_df.groupBy(*original_cols) \
+                                        .agg(F.collect_list("_dq_failure_reason").alias("_dq_failure_reasons")) \
+                                        .withColumn("_dq_failure_reason", F.concat_ws("; ", F.col("_dq_failure_reasons"))) \
+                                        .drop("_dq_failure_reasons")
 
-    # --- Rule 6: Completeness - payment_method must not be null ---
-    rule_name = "payment_method_not_null"
-    business_purpose = "Ensure every order specifies a payment method."
-    severity = "CRITICAL"
-    failure_message = "Payment method is missing."
-    failed_records = df.filter(F.col("payment_method").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 7: Validity - payment_method must be from an allowed list ---
-    # NOTE: This list should be confirmed by business requirements.
-    allowed_payment_methods = ["credit_card", "cash", "gift_card", "bank_transfer"]
-    rule_name = "payment_method_valid_values"
-    business_purpose = "Ensure payment methods conform to predefined categories."
-    severity = "HIGH"
-    failure_message = f"Payment method is not one of the allowed values: {', '.join(allowed_payment_methods)}."
-    failed_records = df.filter(F.col("payment_method").isNotNull() & ~F.col("payment_method").isin(allowed_payment_methods))
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 8: Completeness - status must not be null ---
-    rule_name = "status_not_null"
-    business_purpose = "Ensure every order has a recorded status."
-    severity = "CRITICAL"
-    failure_message = "Order status is missing."
-    failed_records = df.filter(F.col("status").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 9: Validity - status must be from an allowed list ---
-    # NOTE: This list should be confirmed by business requirements.
-    allowed_statuses = ["completed", "pending", "failed", "refunded", "shipped"]
-    rule_name = "status_valid_values"
-    business_purpose = "Ensure order statuses conform to predefined categories."
-    severity = "HIGH"
-    failure_message = f"Order status is not one of the allowed values: {', '.join(allowed_statuses)}."
-    failed_records = df.filter(F.col("status").isNotNull() & ~F.col("status").isin(allowed_statuses))
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 10: Consistency - payment_timestamp must not be null if status is 'completed' ---
-    rule_name = "payment_timestamp_not_null_if_completed"
-    business_purpose = "Ensure completed orders have a payment timestamp."
-    severity = "HIGH"
-    failure_message = "Payment timestamp is missing for a completed order."
-    failed_records = df.filter((F.col("status") == "completed") & F.col("payment_timestamp").isNull())
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 11: Consistency - payment_timestamp must be after or equal to order_date ---
-    rule_name = "payment_timestamp_after_order_date"
-    business_purpose = "Ensure payment processing does not precede the order placement."
-    severity = "HIGH"
-    failure_message = "Payment timestamp is before order date."
-    failed_records = df.filter(
-        F.col("payment_timestamp").isNotNull() & F.col("order_date").isNotNull() &
-        (F.to_date(F.col("payment_timestamp")) < F.col("order_date"))
-    )
-    if failed_records.count() > 0:
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": failed_records.count(),
-            "sample_failed_ids": [row.order_id for row in failed_records.select("order_id").limit(5).collect()]
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {failed_records.count()} records.")
-
-    # --- Rule 12: Uniqueness - transaction_id must be unique if not null ---
-    rule_name = "transaction_id_unique_if_not_null"
-    business_purpose = "Ensure each payment transaction has a unique identifier when present."
-    severity = "HIGH"
-    failure_message = "Duplicate Transaction ID found for non-null transaction IDs."
-    duplicate_transaction_ids_df = df.filter(F.col("transaction_id").isNotNull()) \
-                                     .groupBy("transaction_id").count().filter(F.col("count") > 1)
-    if duplicate_transaction_ids_df.count() > 0:
-        # Get sample transaction_ids that are duplicates
-        sample_duplicate_txns = [row.transaction_id for row in duplicate_transaction_ids_df.limit(5).collect()]
-        # Get sample order_ids associated with these duplicate transaction_ids
-        sample_failed_order_ids = [row.order_id for row in df.filter(F.col("transaction_id").isin(sample_duplicate_txns)).select("order_id").limit(5).collect()]
-
-        validation_results.append({
-            "rule_name": rule_name,
-            "business_purpose": business_purpose,
-            "severity": severity,
-            "failure_message": failure_message,
-            "failed_count": duplicate_transaction_ids_df.count(),
-            "sample_failed_ids": sample_failed_order_ids
-        })
-        logger.warning(f"DQ Check Failed: {rule_name} - {duplicate_transaction_ids_df.count()} records.")
-
-    logger.info(f"Finished data quality checks for table: {table_name}")
-
-    # Define the schema for the results DataFrame
-    results_schema = StructType([
-        StructField("rule_name", StringType(), False),
-        StructField("business_purpose", StringType(), False),
-        StructField("severity", StringType(), False),
-        StructField("failure_message", StringType(), False),
-        StructField("failed_count", IntegerType(), False),
-        StructField("sample_failed_ids", ArrayType(IntegerType()), True) # order_id is IntegerType
-    ])
-
-    if validation_results:
-        # Create a DataFrame from the validation results
-        results_df = spark.createDataFrame(validation_results, schema=results_schema)
-        return results_df
+        return consolidated_failures
     else:
-        logger.info("All data quality checks passed.")
         # Return an empty DataFrame with the expected schema if no failures
-        return spark.createDataFrame([], schema=results_schema)
+        empty_schema = df.schema
+        if "_dq_failure_reason" not in [f.name for f in empty_schema]:
+            empty_schema = empty_schema.add(StructField("_dq_failure_reason", StringType(), True))
+        return df.sparkSession.createDataFrame([], empty_schema)
 
-# Databricks Notebook Cell 3: Example Usage (assuming 'spark' session is available)
 
-# Example: Create a dummy DataFrame for testing
-# This part would be replaced by actual data loading in a real scenario
-data = [
-    (1, 101, "2023-01-01", 100.50, "credit_card", "completed", "txn123", "2023-01-01 10:00:00"),
-    (2, 102, "2023-01-02", 25.00, "cash", "pending", None, None),
-    (3, 103, "2023-01-03", 75.20, "gift_card", "completed", "txn124", "2023-01-03 11:30:00"),
-    (4, 104, "2023-01-04", -5.00, "credit_card", "completed", "txn125", "2023-01-04 09:00:00"), # Invalid amount
-    (5, 105, "2023-01-05", 50.00, "unknown_method", "completed", "txn126", "2023-01-05 14:00:00"), # Invalid payment_method
-    (6, 106, "2023-01-06", 120.00, "credit_card", "invalid_status", "txn127", "2023-01-06 16:00:00"), # Invalid status
-    (7, 107, "2023-01-07", 30.00, "cash", "completed", "txn128", None), # Completed with null payment_timestamp
-    (8, 108, "2023-01-08", 45.00, "credit_card", "completed", "txn129", "2023-01-07 08:00:00"), # payment_timestamp before order_date
-    (9, 109, "2023-01-09", 60.00, "bank_transfer", "pending", "txn123", "2023-01-09 10:00:00"), # Duplicate transaction_id (with order 1)
-    (10, 110, None, 80.00, "credit_card", "completed", "txn130", "2023-01-10 12:00:00"), # Null order_date
-    (11, None, "2023-01-11", 90.00, "credit_card", "completed", "txn131", "2023-01-11 13:00:00"), # Null customer_id
-    (None, 112, "2023-01-12", 110.00, "credit_card", "completed", "txn132", "2023-01-12 14:00:00"), # Null order_id
-    (13, 113, "2023-01-13", None, "credit_card", "completed", "txn133", "2023-01-13 15:00:00"), # Null amount
-    (14, 114, "2023-01-14", 150.00, None, "completed", "txn134", "2023-01-14 16:00:00"), # Null payment_method
-    (15, 115, "2023-01-15", 160.00, "credit_card", None, "txn135", "2023-01-15 17:00:00"), # Null status
-    (1, 116, "2023-01-16", 170.00, "credit_card", "completed", "txn136", "2023-01-16 18:00:00") # Duplicate order_id (with order 1)
+# Cell 2: Define Data Quality Rules for payments.csv
+
+dq_rules = [
+    {
+        "rule_name": "payment_id_not_null",
+        "business_purpose": "Ensure every payment has a unique identifier.",
+        "validation_logic": "id IS NULL",
+        "target_column": "id",
+        "severity": "critical",
+        "failure_message": "Payment ID is null."
+    },
+    {
+        "rule_name": "order_id_not_null",
+        "business_purpose": "Ensure every payment is linked to an order.",
+        "validation_logic": "order_id IS NULL",
+        "target_column": "order_id",
+        "severity": "critical",
+        "failure_message": "Order ID is null."
+    },
+    {
+        "rule_name": "payment_method_not_null_or_empty",
+        "business_purpose": "Ensure every payment has a specified method.",
+        "validation_logic": "payment_method IS NULL OR TRIM(payment_method) = ''",
+        "target_column": "payment_method",
+        "severity": "critical",
+        "failure_message": "Payment method is null or empty."
+    },
+    {
+        "rule_name": "amount_not_null",
+        "business_purpose": "Ensure every payment has an amount.",
+        "validation_logic": "amount IS NULL",
+        "target_column": "amount",
+        "severity": "critical",
+        "failure_message": "Payment amount is null."
+    },
+    {
+        "rule_name": "payment_id_unique",
+        "business_purpose": "Ensure payment IDs are unique across the dataset.",
+        "validation_logic": "AGGREGATE_UNIQUE",
+        "target_column": "id",
+        "severity": "critical",
+        "failure_message": "Duplicate Payment ID found."
+    },
+    {
+        "rule_name": "amount_non_negative",
+        "business_purpose": "Ensure payment amounts are not negative.",
+        "validation_logic": "amount < 0",
+        "target_column": "amount",
+        "severity": "high",
+        "failure_message": "Payment amount is negative."
+    }
 ]
 
-# Convert date and timestamp strings to actual Date and Timestamp objects for schema compliance
-parsed_data = []
-for row in data:
-    order_date_obj = date.fromisoformat(row[2]) if row[2] else None
-    payment_timestamp_obj = datetime.fromisoformat(row[7]) if row[7] else None
-    parsed_data.append((row[0], row[1], order_date_obj, row[3], row[4], row[5], row[6], payment_timestamp_obj))
 
-# Create DataFrame with the defined schema
-# In a real scenario, you would read from a source like:
-# df_raw_orders = spark.read.csv("/Volumes/workspace/default/raw_data/jaffle_shop/orders.csv", schema=raw_orders_schema, header=True)
-df_raw_orders = spark.createDataFrame(parsed_data, schema=raw_orders_schema)
+# Cell 3: Example Usage and Reporting
 
-# Run the data quality checks
-dq_results_df = run_data_quality_checks(df_raw_orders, "bronze_jaffle_shop_payments")
+# Assume 'spark' is an existing SparkSession in Databricks.
+# For local testing, uncomment the following line:
+# from pyspark.sql import SparkSession
+# spark = SparkSession.builder.appName("DQ_Payments_Validation").getOrCreate()
 
-# Display results
-if dq_results_df.count() > 0:
-    print("--- Data Quality Check Failures ---")
-    dq_results_df.display()
+# Define the assumed schema for payments.csv
+payments_schema = StructType([
+    StructField("id", IntegerType(), True),
+    StructField("order_id", IntegerType(), True),
+    StructField("payment_method", StringType(), True),
+    StructField("amount", IntegerType(), True)
+])
+
+# Create a sample DataFrame with some data quality issues for demonstration
+sample_data = [
+    (1, 101, "credit_card", 1000),
+    (2, 102, "coupon", 500),
+    (3, 103, "bank_transfer", 2000),
+    (4, 104, "gift_card", 750),
+    (5, 105, None, 1200),          # payment_method_not_null_or_empty
+    (6, 106, "credit_card", -100), # amount_non_negative
+    (None, 107, "coupon", 300),    # payment_id_not_null
+    (8, None, "credit_card", 1500),# order_id_not_null
+    (9, 109, "credit_card", None), # amount_not_null
+    (1, 110, "debit_card", 200),   # payment_id_unique (duplicate id=1)
+    (10, 111, "credit_card", 1000),
+    (11, 112, "", 500)             # payment_method_not_null_or_empty (empty string)
+]
+
+df_payments = spark.createDataFrame(sample_data, payments_schema)
+
+print("Running data quality checks on payments data...")
+total_records = df_payments.count()
+print(f"Total records in source: {total_records}")
+
+failing_records_df = run_data_quality_checks(df_payments, dq_rules)
+failed_records_count = failing_records_df.count()
+
+print(f"Total records failing DQ checks: {failed_records_count}")
+if total_records > 0:
+    failure_percentage = (failed_records_count / total_records) * 100
+    print(f"Percentage of records failing DQ checks: {failure_percentage:.2f}%")
 else:
-    print("All data quality checks passed successfully!")
+    print("No records to process.")
 
-# Databricks Notebook Cell 4: Data Quality Dimensions Checklist
+if failed_records_count > 0:
+    print("\n--- Failing Records Sample (up to 10) ---")
+    display(failing_records_df.limit(10))
+
+    print("\n--- Failure Summary by Rule ---")
+    # Explode the concatenated failure reasons to count individual rule failures
+    failure_summary = failing_records_df.withColumn("failure_reason_exploded", F.explode(F.split(F.col("_dq_failure_reason"), "; "))) \
+                                        .groupBy("failure_reason_exploded") \
+                                        .agg(F.count("*").alias("failure_count")) \
+                                        .orderBy(F.desc("failure_count"))
+    display(failure_summary)
+
+    # Check for critical failures and potentially raise an alert/exception
+    critical_failures_count = failure_summary.filter(F.col("failure_reason_exploded").contains("Severity: critical")).count()
+    if critical_failures_count > 0:
+        print("\nCRITICAL DATA QUALITY ISSUES DETECTED. Review failing records and consider halting pipeline.")
+        # In a production pipeline, you might raise an exception here to stop further processing:
+        # raise Exception("Critical data quality issues detected in payments data.")
+else:
+    print("\nAll records passed data quality checks!")
+
+
+# Cell 4: Data Quality Dimensions Covered Checklist
 
 # Data Quality Dimensions Covered:
-# [x] Completeness
-# [x] Uniqueness
-# [x] Validity
-# [x] Accuracy
-# [x] Consistency
-# [ ] Integrity (Referential integrity is typically handled in later layers, but uniqueness/completeness of PKs contribute)
-# [ ] Timeliness (Covered by date/timestamp checks, but not explicit "freshness" checks against current time)
-# [ ] Volume (Not explicitly checked, but can be added if needed, e.g., row count thresholds)
+# [x] Completeness (id, order_id, payment_method, amount are not null/empty)
+# [x] Uniqueness (id is unique)
+# [x] Validity (amount is non-negative, payment_method is not empty string)
+# [ ] Accuracy
+# [ ] Consistency
+# [ ] Integrity
+# [ ] Timeliness
+# [ ] Volume
