@@ -1,0 +1,10 @@
+bundle:
+  name: etl_kan_74_etl_bronze_jaffle_shop_orders
+resources:
+  jobs:
+    etl_kan_74_etl_bronze_jaffle_shop_orders:
+      name: etl_kan_74_etl_bronze_jaffle_shop_orders
+      tasks:
+      - task_key: run_notebook
+        notebook_task:
+          notebook_path: /Workspace/etl_agent_framework/etl_kan_74_etl_bronze_jaffle_shop_orders
